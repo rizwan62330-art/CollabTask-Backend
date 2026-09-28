@@ -1,0 +1,722 @@
+openapi: 3.0.3
+info:
+  title: CollabTask API
+  description: >
+    REST API for CollabTask, a collaborative project and task management
+    tool. Supports user authentication, projects with role-based
+    membership, a Kanban-style task board, comments, and notifications.
+  version: "1.0.0"
+  contact:
+    name: CollabTask
+servers:
+  - url: http://localhost:4000/api/v1
+    description: Local development
+
+tags:
+  - name: Auth
+  - name: Users
+  - name: Projects
+  - name: Tasks
+  - name: Comments
+  - name: Notifications
+  - name: Health
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: The API is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  uptime: { type: number, example: 123.45 }
+                  timestamp: { type: string, format: date-time }
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Create a new account
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name: { type: string, example: Amina Yusuf }
+                email: { type: string, format: email, example: amina@collabtask.dev }
+                password: { type: string, format: password, minLength: 8, example: password123 }
+      responses:
+        "201":
+          description: Account created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409":
+          description: An account with that email already exists.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in with email and password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: Authenticated successfully.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401":
+          description: Incorrect email or password.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get the currently authenticated user
+      responses:
+        "200":
+          description: The current user.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /users:
+    get:
+      tags: [Users]
+      summary: List all users (the workspace directory)
+      description: Used to populate assignee/member pickers. Returns every registered user.
+      responses:
+        "200":
+          description: A list of users.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /projects:
+    get:
+      tags: [Projects]
+      summary: List the current user's projects
+      description: Returns every project the authenticated user is a member of, each annotated with `total`/`done` task counts.
+      responses:
+        "200":
+          description: A list of projects.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  projects:
+                    type: array
+                    items: { $ref: "#/components/schemas/ProjectSummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Projects]
+      summary: Create a project
+      description: The creator automatically becomes the project's `owner`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, example: Website Relaunch }
+                description: { type: string, example: Redesign the marketing site. }
+                color: { type: string, example: "#3968d8", description: 6-digit hex color. }
+      responses:
+        "201":
+          description: Project created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { project: { $ref: "#/components/schemas/Project" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /projects/{projectId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [Projects]
+      summary: Get a project, including its member list
+      responses:
+        "200":
+          description: The project.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { project: { $ref: "#/components/schemas/ProjectDetail" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Projects]
+      summary: Update a project
+      description: Requires the `owner` or `admin` role on the project.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string }
+                color: { type: string, example: "#2f9e68" }
+      responses:
+        "200":
+          description: Updated project.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { project: { $ref: "#/components/schemas/Project" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Projects]
+      summary: Delete a project
+      description: Requires the `owner` role. Cascades to the project's tasks, comments, and memberships.
+      responses:
+        "204": { description: Deleted. No content. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /projects/{projectId}/members:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    post:
+      tags: [Projects]
+      summary: Add a member to a project
+      description: Requires the `owner` or `admin` role.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId: { type: string, format: uuid }
+                role: { type: string, enum: [admin, member], default: member }
+      responses:
+        "201":
+          description: Member added; returns the full member list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  members:
+                    type: array
+                    items: { $ref: "#/components/schemas/Member" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: That user is already a member of this project.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /projects/{projectId}/members/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [Projects]
+      summary: Remove a member from a project
+      description: Requires the `owner` or `admin` role. Fails with 409 if this would remove the project's last owner.
+      responses:
+        "200":
+          description: Member removed; returns the remaining member list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  members:
+                    type: array
+                    items: { $ref: "#/components/schemas/Member" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: A project must keep at least one owner.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /projects/{projectId}/tasks:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [Tasks]
+      summary: List tasks on a project's board
+      description: Ordered by column, then by position within the column.
+      responses:
+        "200":
+          description: A list of tasks.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items: { $ref: "#/components/schemas/Task" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Tasks]
+      summary: Create a task
+      description: The task is appended to the end of the given column. If `assigneeId` is set, the assignee receives a `task_assigned` notification.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateTaskBody" }
+      responses:
+        "201":
+          description: Task created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { task: { $ref: "#/components/schemas/Task" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /tasks/{taskId}:
+    parameters:
+      - $ref: "#/components/parameters/TaskId"
+    get:
+      tags: [Tasks]
+      summary: Get a task
+      responses:
+        "200":
+          description: The task.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { task: { $ref: "#/components/schemas/Task" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Tasks]
+      summary: Update a task's fields
+      description: >
+        Partial update — send only the fields you want to change. If
+        `columnId` is included and differs from the task's current column,
+        the task is appended to the end of the new column (for precise
+        drag-and-drop positioning, use `PATCH /tasks/{taskId}/move`
+        instead). Changing `assigneeId` notifies the new assignee.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateTaskBody" }
+      responses:
+        "200":
+          description: Updated task.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { task: { $ref: "#/components/schemas/Task" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Tasks]
+      summary: Delete a task
+      description: Requires the project's `owner`/`admin` role, or being the task's assignee.
+      responses:
+        "204": { description: Deleted. No content. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /tasks/{taskId}/move:
+    parameters:
+      - $ref: "#/components/parameters/TaskId"
+    patch:
+      tags: [Tasks]
+      summary: Move a task to a specific column and position
+      description: >
+        Used for drag-and-drop reordering. Re-indexes positions in both the
+        destination column and (if different) the source column so
+        positions stay contiguous.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [columnId, position]
+              properties:
+                columnId: { $ref: "#/components/schemas/ColumnId" }
+                position: { type: integer, minimum: 0, example: 0, description: Zero-based index within the destination column. }
+      responses:
+        "200":
+          description: Task moved.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { task: { $ref: "#/components/schemas/Task" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /tasks/{taskId}/comments:
+    parameters:
+      - $ref: "#/components/parameters/TaskId"
+    get:
+      tags: [Comments]
+      summary: List a task's comments
+      responses:
+        "200":
+          description: Comments in chronological order.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  comments:
+                    type: array
+                    items: { $ref: "#/components/schemas/Comment" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Comments]
+      summary: Add a comment to a task
+      description: If the task has an assignee other than the comment's author, the assignee receives a `comment_added` notification.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, example: Looks good to me! }
+      responses:
+        "201":
+          description: Comment created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { comment: { $ref: "#/components/schemas/Comment" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /comments/{commentId}:
+    parameters:
+      - name: commentId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [Comments]
+      summary: Delete a comment
+      description: Requires being the comment's author, or the project's `owner`/`admin`.
+      responses:
+        "204": { description: Deleted. No content. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: List the current user's notifications
+      description: Most recent 50, newest first.
+      responses:
+        "200":
+          description: A list of notifications.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items: { $ref: "#/components/schemas/Notification" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /notifications/read-all:
+    patch:
+      tags: [Notifications]
+      summary: Mark all of the current user's notifications as read
+      responses:
+        "200":
+          description: Number of notifications updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { updated: { type: integer, example: 3 } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /notifications/{notificationId}/read:
+    parameters:
+      - name: notificationId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      tags: [Notifications]
+      summary: Mark one notification as read
+      responses:
+        "200":
+          description: The updated notification.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { notification: { $ref: "#/components/schemas/Notification" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    BadRequest:
+      description: Validation failed.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error:
+              message: The request was invalid.
+              code: BAD_REQUEST
+              details: [{ field: "email", message: "Enter a valid email address." }]
+    Unauthorized:
+      description: Missing, invalid, or expired access token.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { message: "Missing or malformed Authorization header.", code: "UNAUTHORIZED" } }
+    Forbidden:
+      description: Authenticated, but not allowed to perform this action.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { message: "You are not a member of this project.", code: "FORBIDDEN" } }
+    NotFound:
+      description: The resource does not exist.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { message: "Project not found.", code: "NOT_FOUND" } }
+    RateLimited:
+      description: Too many requests; try again later.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    ColumnId:
+      type: string
+      enum: [todo, in_progress, review, done]
+    Priority:
+      type: string
+      enum: [low, medium, high]
+    Role:
+      type: string
+      enum: [owner, admin, member]
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            message: { type: string }
+            code: { type: string }
+            details: { type: array, items: { type: object } }
+
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string, format: email }
+        createdAt: { type: string, format: date-time }
+
+    Member:
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          properties:
+            role: { $ref: "#/components/schemas/Role" }
+
+    AuthResponse:
+      type: object
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        token: { type: string, description: "JWT access token. Send as `Authorization: Bearer <token>`." }
+
+    Project:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        color: { type: string }
+        ownerId: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+
+    ProjectSummary:
+      allOf:
+        - $ref: "#/components/schemas/Project"
+        - type: object
+          properties:
+            total: { type: integer, description: Total number of tasks. }
+            done: { type: integer, description: "Number of tasks in the \"done\" column." }
+
+    ProjectDetail:
+      allOf:
+        - $ref: "#/components/schemas/Project"
+        - type: object
+          properties:
+            members:
+              type: array
+              items: { $ref: "#/components/schemas/Member" }
+
+    Task:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string }
+        columnId: { $ref: "#/components/schemas/ColumnId" }
+        priority: { $ref: "#/components/schemas/Priority" }
+        assigneeId: { type: string, format: uuid, nullable: true }
+        dueDate: { type: string, format: date, nullable: true }
+        position: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    CreateTaskBody:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, example: Write launch announcement }
+        description: { type: string }
+        columnId: { $ref: "#/components/schemas/ColumnId" }
+        priority: { $ref: "#/components/schemas/Priority" }
+        assigneeId: { type: string, format: uuid, nullable: true }
+        dueDate: { type: string, format: date, nullable: true, example: "2026-10-02" }
+
+    UpdateTaskBody:
+      type: object
+      minProperties: 1
+      properties:
+        title: { type: string }
+        description: { type: string }
+        columnId: { $ref: "#/components/schemas/ColumnId" }
+        priority: { $ref: "#/components/schemas/Priority" }
+        assigneeId: { type: string, format: uuid, nullable: true }
+        dueDate: { type: string, format: date, nullable: true }
+
+    Comment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        taskId: { type: string, format: uuid }
+        authorId: { type: string, format: uuid }
+        body: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    Notification:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        type: { type: string, enum: [task_assigned, comment_added, due_soon] }
+        payload: { type: object, additionalProperties: true }
+        readAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+security:
+  - bearerAuth: []
